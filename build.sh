@@ -15,18 +15,13 @@ git lfs pull || echo "Skipping git-lfs pull"
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# --- Custom Fix: Rename model file for TensorFlow --- #
-# Render blocks uploading .keras files, so we renamed it to .keras.txt
-# Now we rename it back during build so TF can load it
+# --- NEW: Download MRI model from Hugging Face (instead of renaming) --- #
+echo "📦 Downloading MRI model from Hugging Face..."
+curl -L -o mri_binary_model.keras "https://huggingface.co/datasets/DarkxCrafter/mri_model_backup/resolve/main/mri_binary_model.keras"
 
-if [ -f "mri_binary_model.keras.txt" ]; then
-    mv mri_binary_model.keras.txt mri_binary_model.keras
-    echo "✅ Renamed MRI model to mri_binary_model.keras"
+if [ -f "mri_binary_model.keras" ]; then
+    echo "✅ MRI model downloaded successfully."
+else
+    echo "❌ Failed to download MRI model." >&2
+    exit 1
 fi
-
-# You can add similar renaming for other models if needed:
-# Example:
-# if [ -f "emotion_model_cpu.pth.txt" ]; then
-#     mv emotion_model_cpu.pth.txt emotion_model_cpu.pth
-#     echo "✅ Renamed eye model"
-# fi
