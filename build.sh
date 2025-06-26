@@ -1,3 +1,2 @@
-touch build.sh
-chmod +x build.sh
-echo -e '#!/usr/bin/env bash\npip install -r requirements.txt' > build.sh
+#!/usr/bin/env bash
+pip install -r requirements.txt
