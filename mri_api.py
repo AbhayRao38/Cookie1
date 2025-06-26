@@ -4,6 +4,9 @@ import numpy as np
 from PIL import Image
 import cv2
 import logging
+import os
+import requests
+from pathlib import Path
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -11,10 +14,29 @@ logging.basicConfig(level=logging.INFO)
 # Suppress TensorFlow warnings
 tf.get_logger().setLevel('ERROR')
 
-# Load MRI model (MobileNetV2-based from your training)
+# Hugging Face-hosted model URL
+MODEL_URL = "https://huggingface.co/datasets/DarkxCrafter/mri_model_backup/resolve/main/mri_binary_model.keras"
+MODEL_PATH = "mri_binary_model.keras"
+
+# Download model from Hugging Face if not already present
+if not os.path.exists(MODEL_PATH):
+    logging.info("Downloading MRI model from Hugging Face...")
+    try:
+        response = requests.get(MODEL_URL)
+        response.raise_for_status()
+        with open(MODEL_PATH, 'wb') as f:
+            f.write(response.content)
+        logging.info("Model download complete.")
+    except Exception as e:
+        logging.error(f"Failed to download model: {e}")
+        mri_model = None
+else:
+    logging.info("Model file already exists locally.")
+
+# Load the MRI model
 try:
-    mri_model = tf.keras.models.load_model('mri_binary_model.keras')
-    logging.info("MRI model (MobileNetV2-based) loaded successfully")
+    mri_model = tf.keras.models.load_model(MODEL_PATH)
+    logging.info("MRI model (MobileNetV2-based) loaded successfully from HF")
 except Exception as e:
     logging.error(f"Failed to load MRI model: {e}")
     mri_model = None
@@ -23,26 +45,19 @@ def preprocess_mri_image(image):
     """
     Preprocess MRI image to match your training format (128x128x3)
     """
-    # Convert to grayscale if needed
     if len(image.shape) == 3:
         if image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         elif image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
     
-    # Resize to model input size (128x128 as per your training)
     image = cv2.resize(image, (128, 128), interpolation=cv2.INTER_LINEAR)
-    
-    # Normalize to [0, 1]
     image = image.astype(np.float32) / 255.0
-    
-    # Convert grayscale to RGB (repeat channels) - your model expects RGB
+
     if len(image.shape) == 2:
         image = np.stack([image, image, image], axis=-1)
-    
-    # Add batch dimension
+
     image = np.expand_dims(image, axis=0)
-    
     return image
 
 @app.route('/health', methods=['GET'])
@@ -62,43 +77,35 @@ def predict_mri():
             'success': False,
             'error': 'MRI model not loaded'
         }), 500
-    
+
     try:
         if 'file' not in request.files:
             return jsonify({
                 'success': False,
                 'error': 'No file provided'
             }), 400
-            
+
         image_file = request.files['file']
         if image_file.filename == '':
             return jsonify({
                 'success': False,
                 'error': 'No file selected'
             }), 400
-        
-        # Load and preprocess image
+
         image = Image.open(image_file.stream)
         image_np = np.array(image)
-        
-        # Preprocess for MRI model
         processed_image = preprocess_mri_image(image_np)
-        
-        # Get prediction
+
         prediction = mri_model.predict(processed_image, verbose=0)
-        
-        # Extract probability (sigmoid output for binary classification)
         mci_probability = float(prediction[0][0])
-        probabilities = [1 - mci_probability, mci_probability]  # [Non-MCI, MCI]
-        
-        # Apply custom threshold from your training (0.312)
+        probabilities = [1 - mci_probability, mci_probability]
+
         custom_threshold = 0.312
         predicted_class = 1 if mci_probability >= custom_threshold else 0
-        
-        # Calculate confidence based on distance from threshold
+
         confidence = abs(mci_probability - custom_threshold) / max(custom_threshold, 1 - custom_threshold)
-        confidence = min(confidence + 0.5, 1.0)  # Ensure confidence is reasonable
-        
+        confidence = min(confidence + 0.5, 1.0)
+
         return jsonify({
             'success': True,
             'probabilities': probabilities,
@@ -108,7 +115,7 @@ def predict_mri():
             'threshold_used': custom_threshold,
             'raw_prediction': prediction.tolist()
         })
-        
+
     except Exception as e:
         logging.error(f"Error in MRI prediction: {e}")
         return jsonify({
