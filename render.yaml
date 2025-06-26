@@ -1,0 +1,5 @@
+build:
+  pythonVersion: 3.10
+
+buildCommand: ./build.sh
+startCommand: gunicorn mri_api:app
