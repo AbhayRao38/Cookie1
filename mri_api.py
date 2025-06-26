@@ -24,22 +24,14 @@ def ensure_model_loaded():
         return
 
     if not os.path.exists(MODEL_PATH):
-        logging.info("Downloading MRI model from Hugging Face...")
-        try:
-            response = requests.get(MODEL_URL)
-            response.raise_for_status()
-            with open(MODEL_PATH, 'wb') as f:
-                f.write(response.content)
-            logging.info("Model download complete.")
-        except Exception as e:
-            logging.error(f"Failed to download model: {e}")
-            raise RuntimeError("Model download failed") from e
+        logging.error("❌ MRI model file not found. Ensure it's downloaded during build in build.sh.")
+        raise RuntimeError("Model file not found in container. Expected at: {}".format(MODEL_PATH))
 
     try:
         mri_model = tf.keras.models.load_model(MODEL_PATH)
-        logging.info("MRI model (MobileNetV2-based) loaded successfully.")
+        logging.info("✅ MRI model (MobileNetV2-based) loaded successfully.")
     except Exception as e:
-        logging.error(f"Failed to load MRI model: {e}")
+        logging.error(f"❌ Failed to load MRI model: {e}")
         raise RuntimeError("Model load failed") from e
 
 def preprocess_mri_image(image):
