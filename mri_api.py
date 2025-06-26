@@ -6,7 +6,6 @@ import cv2
 import logging
 import os
 import requests
-from pathlib import Path
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -14,43 +13,45 @@ logging.basicConfig(level=logging.INFO)
 # Suppress TensorFlow warnings
 tf.get_logger().setLevel('ERROR')
 
-# Hugging Face-hosted model URL
+# Model download info
 MODEL_URL = "https://huggingface.co/datasets/DarkxCrafter/mri_model_backup/resolve/main/mri_binary_model.keras"
 MODEL_PATH = "mri_binary_model.keras"
+mri_model = None
 
-# Download model from Hugging Face if not already present
-if not os.path.exists(MODEL_PATH):
-    logging.info("Downloading MRI model from Hugging Face...")
+def ensure_model_loaded():
+    global mri_model
+    if mri_model is not None:
+        return
+
+    if not os.path.exists(MODEL_PATH):
+        logging.info("Downloading MRI model from Hugging Face...")
+        try:
+            response = requests.get(MODEL_URL)
+            response.raise_for_status()
+            with open(MODEL_PATH, 'wb') as f:
+                f.write(response.content)
+            logging.info("Model download complete.")
+        except Exception as e:
+            logging.error(f"Failed to download model: {e}")
+            raise RuntimeError("Model download failed") from e
+
     try:
-        response = requests.get(MODEL_URL)
-        response.raise_for_status()
-        with open(MODEL_PATH, 'wb') as f:
-            f.write(response.content)
-        logging.info("Model download complete.")
+        mri_model = tf.keras.models.load_model(MODEL_PATH)
+        logging.info("MRI model (MobileNetV2-based) loaded successfully.")
     except Exception as e:
-        logging.error(f"Failed to download model: {e}")
-        mri_model = None
-else:
-    logging.info("Model file already exists locally.")
-
-# Load the MRI model
-try:
-    mri_model = tf.keras.models.load_model(MODEL_PATH)
-    logging.info("MRI model (MobileNetV2-based) loaded successfully from HF")
-except Exception as e:
-    logging.error(f"Failed to load MRI model: {e}")
-    mri_model = None
+        logging.error(f"Failed to load MRI model: {e}")
+        raise RuntimeError("Model load failed") from e
 
 def preprocess_mri_image(image):
     """
-    Preprocess MRI image to match your training format (128x128x3)
+    Preprocess MRI image to match training format (128x128x3).
     """
     if len(image.shape) == 3:
         if image.shape[2] == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         elif image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
-    
+
     image = cv2.resize(image, (128, 128), interpolation=cv2.INTER_LINEAR)
     image = image.astype(np.float32) / 255.0
 
@@ -62,6 +63,14 @@ def preprocess_mri_image(image):
 
 @app.route('/health', methods=['GET'])
 def health_check():
+    try:
+        ensure_model_loaded()
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
     return jsonify({
         'status': 'healthy',
         'model_loaded': mri_model is not None,
@@ -72,13 +81,9 @@ def health_check():
 
 @app.route('/predict/mri', methods=['POST'])
 def predict_mri():
-    if mri_model is None:
-        return jsonify({
-            'success': False,
-            'error': 'MRI model not loaded'
-        }), 500
-
     try:
+        ensure_model_loaded()
+
         if 'file' not in request.files:
             return jsonify({
                 'success': False,
